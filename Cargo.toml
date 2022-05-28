@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 uuid = { version = "0.5.1", features = ["serde", "v4"] }
 rand = "0.8.5"
+dashmap = "3.11.10"
 
 [dev-dependencies]
 quickcheck = "1.0.3"

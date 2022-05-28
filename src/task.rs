@@ -1,31 +1,154 @@
-use std::collections::HashSet;
+use dashmap::mapref::one::{Ref as DashMapRef, RefMut as DashMapRefMut};
+use dashmap::{DashMap, DashSet};
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 use uuid::Uuid;
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct TaskId(String);
+
+impl TaskId {
+    fn new() -> Self {
+        TaskId(Uuid::new_v4().to_string())
+    }
+}
+
+type TaskMap = DashMap<TaskId, Task>;
+
+struct TaskRef<'a> {
+    inner: DashMapRef<'a, TaskId, Task>,
+}
+
+impl<'a> From<DashMapRef<'a, TaskId, Task>> for TaskRef<'a> {
+    fn from(actual_ref: DashMapRef<'a, TaskId, Task>) -> Self {
+        Self { inner: actual_ref }
+    }
+}
+
+impl<'a> Deref for TaskRef<'a> {
+    type Target = Task;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.value()
+    }
+}
+
+struct TaskRefMut<'a> {
+    inner: DashMapRefMut<'a, TaskId, Task>,
+}
+
+impl<'a> From<DashMapRefMut<'a, TaskId, Task>> for TaskRefMut<'a> {
+    fn from(actual_ref: DashMapRefMut<'a, TaskId, Task>) -> Self {
+        Self { inner: actual_ref }
+    }
+}
+
+impl<'a> Deref for TaskRefMut<'a> {
+    type Target = Task;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.value()
+    }
+}
+
+impl<'a> DerefMut for TaskRefMut<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.value_mut()
+    }
+}
+
+struct NewTaskHandle {
+    id: TaskId,
+    map: Arc<TaskMap>,
+}
+
+impl NewTaskHandle {
+    fn new(id: TaskId, map: Arc<TaskMap>) -> Self {
+        Self { id, map }
+    }
+
+    fn get(&self) -> Option<TaskRef<'_>> {
+        self.map.get(&self.id).map(|r| TaskRef::from(r))
+    }
+
+    fn get_mut(&self) -> Option<TaskRefMut<'_>> {
+        self.map.get_mut(&self.id).map(|r| TaskRefMut::from(r))
+    }
+}
+
+pub struct TaskManager {
+    inner: Arc<TaskMap>,
+}
+
+impl Default for TaskManager {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(DashMap::new()),
+        }
+    }
+}
+
+impl TaskManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn new_task(&mut self, task_name: &str) -> NewTaskHandle {
+        self._create_task(task_name.into(), None)
+    }
+
+    pub fn new_task_with_description(
+        &mut self,
+        task_name: &str,
+        description: &str,
+    ) -> NewTaskHandle {
+        self._create_task(task_name.into(), Some(description.into()))
+    }
+
+    fn _create_task(&mut self, name: String, description: Option<String>) -> NewTaskHandle {
+        let t = Task::new(name, description, self.inner.clone());
+        let id_for_handle = t.id.clone();
+        let id = t.id.clone();
+        self.inner.insert(id, t);
+        NewTaskHandle::new(id_for_handle, self.inner.clone())
+    }
+
+    pub fn get(&self, id: &TaskId) -> Option<TaskRef<'_>> {
+        self.inner.get(id).map(|r| TaskRef::from(r))
+    }
+
+    pub fn get_mut(&self, id: &TaskId) -> Option<TaskRefMut<'_>> {
+        self.inner.get_mut(id).map(|r| TaskRefMut::from(r))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AddDependencyError {
+    CycleDetected,
+}
+
+enum DependencyKind {
+    Direct,
+    Transitive,
+}
+
 pub struct Task {
-    id: String,
+    tasks: Arc<TaskMap>,
+    id: TaskId,
     name: String,
     description: Option<String>,
     completed: bool,
-    depends_on: Option<HashSet<String>>,
+    deps: Option<DashSet<TaskId>>,
 }
 
 impl Task {
-    pub fn new(task_name: String) -> Self {
+    fn new(task_name: String, description: Option<String>, tasks: Arc<TaskMap>) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
+            tasks,
+            id: TaskId::new(),
             name: task_name,
-            description: None,
-            depends_on: None,
-            completed: false,
-        }
-    }
-
-    pub fn with_description(task_name: String, description: String) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            name: task_name,
-            description: Some(description),
-            depends_on: None,
+            description,
+            deps: None,
             completed: false,
         }
     }
@@ -58,28 +181,49 @@ impl Task {
     }
 
     fn has_dependencies(&self) -> bool {
-        match &self.depends_on {
+        match &self.deps {
             None => false,
             Some(deps) => !deps.is_empty(),
         }
     }
 
     fn num_dependencies(&self) -> usize {
-        match &self.depends_on {
+        match &self.deps {
             None => 0,
             Some(deps) => deps.len(),
         }
     }
 
-    fn add_dependency(&mut self, dependency: &Task) {
-        if self.depends_on.is_none() {
-            self.depends_on = Some(HashSet::from([dependency.id.clone()]));
-        } else {
-            self.depends_on
-                .as_mut()
-                .unwrap()
-                .insert(dependency.id.clone());
+    fn depends_on(&self, target: &Task) -> Option<DependencyKind> {
+        if self.deps.is_none() {
+            return None;
         }
+
+        if self.deps.as_ref().unwrap().contains(&target.id) {
+            return Some(DependencyKind::Direct);
+        }
+
+        for dep_id in self.deps.as_ref().unwrap().iter() {
+            let dep = self.tasks.get(&dep_id).expect("Found dangling task");
+            if dep.depends_on(target).is_some() {
+                return Some(DependencyKind::Transitive);
+            }
+        }
+
+        None
+    }
+
+    fn add_dependency(&mut self, dependency: &Task) -> Result<(), AddDependencyError> {
+        if self.depends_on(dependency).is_some() {
+            return Err(AddDependencyError::CycleDetected);
+        }
+
+        if self.deps.is_none() {
+            self.deps = Some(DashSet::new());
+        }
+        self.deps.as_mut().unwrap().insert(dependency.id.clone());
+
+        Ok(())
     }
 }
 
@@ -88,22 +232,27 @@ mod tests {
 
     #[test]
     fn create_task_with_name() {
-        let name = "hello world!";
-        let t = Task::new(name.to_string());
-        assert_eq!(t.name(), name);
+        let mut mngr = TaskManager::new();
+        let t = mngr.new_task("hello world!").get().unwrap();
+        assert_eq!(t.name(), "hello world!");
     }
 
     #[test]
     fn create_task_with_description() {
+        let mut mngr = TaskManager::new();
         let name = "hello world!";
         let description = "this is a very small task";
-        let t = Task::with_description(name.to_string(), description.to_string());
+        let t = mngr
+            .new_task_with_description(name, description)
+            .get()
+            .unwrap();
         assert_eq!(t.description().unwrap(), description);
     }
 
     #[test]
     fn update_task() {
-        let mut t = Task::new("hi".to_string());
+        let mut mngr = TaskManager::new();
+        let t = mngr.new_task("hi").get_mut().unwrap();
 
         let new_name = "new name";
         let new_desc = "new description";
@@ -117,7 +266,8 @@ mod tests {
 
     #[test]
     fn complete_task() {
-        let mut t = Task::new("hello world".to_string());
+        let mut mngr = TaskManager::new();
+        let t = mngr.new_task("hello world").get_mut().unwrap();
         assert!(!t.completed());
 
         t.complete();
@@ -129,8 +279,10 @@ mod tests {
 
     #[test]
     fn create_task_with_dependency() {
-        let dep = Task::new(String::from("dependent task"));
-        let mut parent = Task::new(String::from("parent"));
+        let mut mngr = TaskManager::new();
+        let dep = mngr.new_task("dependent task").get().unwrap();
+        let parent = mngr.new_task("parent").get_mut().unwrap();
+
         parent.add_dependency(&dep);
 
         assert!(parent.has_dependencies());
@@ -139,8 +291,10 @@ mod tests {
 
     #[test]
     fn prevent_duplicate_dependencies() {
-        let dep = Task::new(String::from("dependent task"));
-        let mut parent = Task::new(String::from("parent"));
+        let mut mngr = TaskManager::new();
+
+        let dep = mngr.new_task("dependent").get().unwrap();
+        let parent = mngr.new_task("parent").get_mut().unwrap();
 
         for _ in 0..100 {
             parent.add_dependency(&dep);
@@ -148,5 +302,19 @@ mod tests {
 
         assert!(parent.has_dependencies());
         assert_eq!(parent.num_dependencies(), 1);
+    }
+
+    #[test]
+    fn prevent_simple_cycle() {
+        let mut mngr = TaskManager::new();
+
+        let mut t1 = mngr.new_task("t1").get_mut().unwrap();
+        let mut t2 = mngr.new_task("t2").get_mut().unwrap();
+
+        assert!(t1.add_dependency(&t2).is_ok());
+        assert_eq!(
+            t2.add_dependency(&t1).err(),
+            Some(AddDependencyError::CycleDetected)
+        );
     }
 }
