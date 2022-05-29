@@ -214,7 +214,7 @@ impl Task {
     }
 
     fn add_dependency(&mut self, dependency: &Task) -> Result<(), AddDependencyError> {
-        if self.depends_on(dependency).is_some() {
+        if dependency.depends_on(self).is_some() {
             return Err(AddDependencyError::CycleDetected);
         }
 
