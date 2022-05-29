@@ -15,7 +15,7 @@ impl TaskId {
 
 type TaskMap = DashMap<TaskId, Task>;
 
-struct TaskRef<'a> {
+pub struct TaskRef<'a> {
     inner: DashMapRef<'a, TaskId, Task>,
 }
 
@@ -33,7 +33,7 @@ impl<'a> Deref for TaskRef<'a> {
     }
 }
 
-struct TaskRefMut<'a> {
+pub struct TaskRefMut<'a> {
     inner: DashMapRefMut<'a, TaskId, Task>,
 }
 
@@ -57,7 +57,7 @@ impl<'a> DerefMut for TaskRefMut<'a> {
     }
 }
 
-struct NewTaskHandle {
+pub struct NewTaskHandle {
     id: TaskId,
     map: Arc<TaskMap>,
 }
@@ -68,11 +68,11 @@ impl NewTaskHandle {
     }
 
     fn get(&self) -> Option<TaskRef<'_>> {
-        self.map.get(&self.id).map(|r| TaskRef::from(r))
+        self.map.get(&self.id).map(TaskRef::from)
     }
 
     fn get_mut(&self) -> Option<TaskRefMut<'_>> {
-        self.map.get_mut(&self.id).map(|r| TaskRefMut::from(r))
+        self.map.get_mut(&self.id).map(TaskRefMut::from)
     }
 }
 
@@ -114,11 +114,11 @@ impl TaskManager {
     }
 
     pub fn get(&self, id: &TaskId) -> Option<TaskRef<'_>> {
-        self.inner.get(id).map(|r| TaskRef::from(r))
+        self.inner.get(id).map(TaskRef::from)
     }
 
     pub fn get_mut(&self, id: &TaskId) -> Option<TaskRefMut<'_>> {
-        self.inner.get_mut(id).map(|r| TaskRefMut::from(r))
+        self.inner.get_mut(id).map(TaskRefMut::from)
     }
 }
 
