@@ -195,11 +195,7 @@ impl Task {
     }
 
     fn depends_on(&self, target: &Task) -> Option<DependencyKind> {
-        if self.deps.is_none() {
-            return None;
-        }
-
-        if self.deps.as_ref().unwrap().contains(&target.id) {
+        if self.deps.as_ref()?.contains(&target.id) {
             return Some(DependencyKind::Direct);
         }
 
