@@ -233,7 +233,8 @@ mod tests {
     #[test]
     fn create_task_with_name() {
         let mut mngr = TaskManager::new();
-        let t = mngr.new_task("hello world!").get().unwrap();
+        let handle = mngr.new_task("hello world!");
+        let t = handle.get().unwrap();
         assert_eq!(t.name(), "hello world!");
     }
 
@@ -242,17 +243,16 @@ mod tests {
         let mut mngr = TaskManager::new();
         let name = "hello world!";
         let description = "this is a very small task";
-        let t = mngr
-            .new_task_with_description(name, description)
-            .get()
-            .unwrap();
+        let handle = mngr.new_task_with_description(name, description);
+        let t = handle.get().unwrap();
         assert_eq!(t.description().unwrap(), description);
     }
 
     #[test]
     fn update_task() {
         let mut mngr = TaskManager::new();
-        let t = mngr.new_task("hi").get_mut().unwrap();
+        let handle = mngr.new_task("hi");
+        let mut t = handle.get_mut().unwrap();
 
         let new_name = "new name";
         let new_desc = "new description";
@@ -267,7 +267,8 @@ mod tests {
     #[test]
     fn complete_task() {
         let mut mngr = TaskManager::new();
-        let t = mngr.new_task("hello world").get_mut().unwrap();
+        let handle = mngr.new_task("hello world");
+        let mut t = handle.get_mut().unwrap();
         assert!(!t.completed());
 
         t.complete();
@@ -280,10 +281,14 @@ mod tests {
     #[test]
     fn create_task_with_dependency() {
         let mut mngr = TaskManager::new();
-        let dep = mngr.new_task("dependent task").get().unwrap();
-        let parent = mngr.new_task("parent").get_mut().unwrap();
 
-        parent.add_dependency(&dep);
+        let handle = mngr.new_task("dependent task");
+        let dep = handle.get().unwrap();
+
+        let handle = mngr.new_task("parent");
+        let mut parent = handle.get_mut().unwrap();
+
+        parent.add_dependency(&dep).unwrap();
 
         assert!(parent.has_dependencies());
         assert_eq!(parent.num_dependencies(), 1);
@@ -293,11 +298,13 @@ mod tests {
     fn prevent_duplicate_dependencies() {
         let mut mngr = TaskManager::new();
 
-        let dep = mngr.new_task("dependent").get().unwrap();
-        let parent = mngr.new_task("parent").get_mut().unwrap();
+        let handle = mngr.new_task("dependent");
+        let dep = handle.get().unwrap();
+        let handle = mngr.new_task("parent");
+        let mut parent = handle.get_mut().unwrap();
 
         for _ in 0..100 {
-            parent.add_dependency(&dep);
+            parent.add_dependency(&dep).unwrap();
         }
 
         assert!(parent.has_dependencies());
@@ -308,8 +315,10 @@ mod tests {
     fn prevent_simple_cycle() {
         let mut mngr = TaskManager::new();
 
-        let mut t1 = mngr.new_task("t1").get_mut().unwrap();
-        let mut t2 = mngr.new_task("t2").get_mut().unwrap();
+        let t1ref = mngr.new_task("t1");
+        let mut t1 = t1ref.get_mut().unwrap();
+        let t2ref = mngr.new_task("t2");
+        let mut t2 = t2ref.get_mut().unwrap();
 
         assert!(t1.add_dependency(&t2).is_ok());
         assert_eq!(
