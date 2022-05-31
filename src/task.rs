@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct TaskId(u64);
 
 static NEXT_TASK_ID: AtomicU64 = AtomicU64::new(0);
@@ -132,14 +132,14 @@ impl TaskManager {
         child: &TaskId,
     ) -> Result<(), AddDependencyError> {
         match self.inner.get(parent) {
-            None => Err(AddDependencyError::TaskNotFound(parent)),
+            None => Err(AddDependencyError::TaskNotFound(*parent)),
             Some(parent_task) => parent_task.add_dependency(child),
         }
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum AddDependencyError {
+pub enum AddDependencyError {
     CycleDetected,
     TaskNotFound(TaskId),
 }
@@ -156,7 +156,7 @@ pub struct Task {
     name: String,
     description: Option<String>,
     completed: bool,
-    deps: Option<DashSet<TaskId>>,
+    deps: DashSet<TaskId>,
 }
 
 impl Task {
@@ -166,7 +166,7 @@ impl Task {
             id: TaskId::new(),
             name: task_name,
             description,
-            deps: None,
+            deps: DashSet::new(),
             completed: false,
         }
     }
@@ -199,25 +199,19 @@ impl Task {
     }
 
     fn has_dependencies(&self) -> bool {
-        match &self.deps {
-            None => false,
-            Some(deps) => !deps.is_empty(),
-        }
+        !self.deps.is_empty()
     }
 
     fn num_dependencies(&self) -> usize {
-        match &self.deps {
-            None => 0,
-            Some(deps) => deps.len(),
-        }
+        self.deps.len()
     }
 
     fn depends_on(&self, target: &TaskId) -> Option<DependencyKind> {
-        if self.deps.as_ref()?.contains(target) {
+        if self.deps.contains(target) {
             return Some(DependencyKind::Direct);
         }
 
-        for dep_id in self.deps.as_ref().unwrap().iter() {
+        for dep_id in self.deps.iter() {
             let dep = self.tasks.get(&dep_id).expect("Found dangling task");
             if dep.depends_on(target).is_some() {
                 return Some(DependencyKind::Transitive);
@@ -227,18 +221,14 @@ impl Task {
         None
     }
 
-    fn add_dependency(&mut self, dependency_id: &TaskId) -> Result<(), AddDependencyError> {
+    fn add_dependency(&self, dependency_id: &TaskId) -> Result<(), AddDependencyError> {
         match self.tasks.get(dependency_id) {
-            None => Err(AddDependencyError::TaskNotFound(dependency_id)),
+            None => Err(AddDependencyError::TaskNotFound(*dependency_id)),
             Some(dep) => {
                 if dep.depends_on(&self.id).is_some() {
                     return Err(AddDependencyError::CycleDetected);
                 }
-                if self.deps.is_none() {
-                    self.deps = Some(DashSet::new());
-                }
-                self.deps.as_mut().unwrap().insert(dep.id.clone());
-
+                self.deps.insert(dep.id.clone());
                 Ok(())
             }
         }
