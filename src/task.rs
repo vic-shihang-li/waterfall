@@ -71,8 +71,16 @@ impl NewTaskHandle {
         self.map.get(&self.id).map(TaskRef::from)
     }
 
+    fn get_unchecked(&self) -> TaskRef<'_> {
+        self.get().unwrap()
+    }
+
     fn get_mut(&self) -> Option<TaskRefMut<'_>> {
         self.map.get_mut(&self.id).map(TaskRefMut::from)
+    }
+
+    fn get_mut_unchecked(&self) -> TaskRefMut<'_> {
+        self.get_mut().unwrap()
     }
 }
 
@@ -127,6 +135,7 @@ enum AddDependencyError {
     CycleDetected,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum DependencyKind {
     Direct,
     Transitive,
@@ -288,6 +297,46 @@ mod tests {
 
         assert!(parent.has_dependencies());
         assert_eq!(parent.num_dependencies(), 1);
+        assert_eq!(parent.depends_on(&dep).unwrap(), DependencyKind::Direct);
+    }
+
+    #[test]
+    fn create_transitive_dependency() {
+        // t1 -> t2 -> t3
+        
+        let mut mngr = TaskManager::new();
+
+        let handle1 = mngr.new_task("t1");
+        let handle2 = mngr.new_task("t2");
+        let handle3 = mngr.new_task("t3");
+
+        let mut t1 = handle1.get_mut_unchecked();
+        let mut t2 = handle2.get_mut_unchecked();
+        let mut t3 = handle3.get_mut_unchecked();
+
+        t1.add_dependency(&t2).unwrap();
+        t2.add_dependency(&t3).unwrap();
+        assert_eq!(t1.depends_on(&t3).unwrap(), DependencyKind::Transitive);
+    }
+
+    #[test]
+    fn dependency_is_unidirectional() {
+        // t1 -> t2 -> t3
+        
+        let mut mngr = TaskManager::new();
+
+        let handle1 = mngr.new_task("t1");
+        let handle2 = mngr.new_task("t2");
+        let handle3 = mngr.new_task("t3");
+
+        let mut t1 = handle1.get_mut_unchecked();
+        let mut t2 = handle2.get_mut_unchecked();
+        let mut t3 = handle3.get_mut_unchecked();
+
+        t1.add_dependency(&t2).unwrap();
+        t2.add_dependency(&t3).unwrap();
+        assert!(t1.depends_on(&t3).is_some());
+        assert!(t3.depends_on(&t1).is_none());
     }
 
     #[test]
@@ -309,16 +358,44 @@ mod tests {
 
     #[test]
     fn prevent_simple_cycle() {
+        // t1 -> t2 -> t1
+
         let mut mngr = TaskManager::new();
 
-        let t1ref = mngr.new_task("t1");
-        let mut t1 = t1ref.get_mut().unwrap();
-        let t2ref = mngr.new_task("t2");
-        let mut t2 = t2ref.get_mut().unwrap();
+        let handle1 = mngr.new_task("t1");
+        let handle2 = mngr.new_task("t2");
+
+        let mut t1 = handle1.get_mut_unchecked();
+        let mut t2 = handle2.get_mut_unchecked();
 
         assert!(t1.add_dependency(&t2).is_ok());
         assert_eq!(
             t2.add_dependency(&t1).err(),
+            Some(AddDependencyError::CycleDetected)
+        );
+    }
+
+    #[test]
+    fn prevent_linear_dependency_cycle() {
+        // t1 -> t2 -> t3 -> t4 -> t1
+
+        let mut mngr = TaskManager::new();
+
+        let handle1 = mngr.new_task("t1");
+        let handle2 = mngr.new_task("t2");
+        let handle3 = mngr.new_task("t3");
+        let handle4 = mngr.new_task("t4");
+
+        let mut t1 = handle1.get_mut_unchecked();
+        let mut t2 = handle2.get_mut_unchecked();
+        let mut t3 = handle3.get_mut_unchecked();
+        let mut t4 = handle4.get_mut_unchecked();
+
+        assert!(t1.add_dependency(&t2).is_ok());
+        assert!(t2.add_dependency(&t3).is_ok());
+        assert!(t3.add_dependency(&t4).is_ok());
+        assert_eq!(
+            t4.add_dependency(&t1).err(),
             Some(AddDependencyError::CycleDetected)
         );
     }
