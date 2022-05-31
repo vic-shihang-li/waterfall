@@ -103,15 +103,15 @@ impl TaskManager {
         Self::default()
     }
 
-    pub fn new_task(&mut self, task_name: &str) -> TaskId {
+    pub fn new_task(&self, task_name: &str) -> TaskId {
         self._create_task(task_name.into(), None)
     }
 
-    pub fn new_task_with_description(&mut self, task_name: &str, description: &str) -> TaskId {
+    pub fn new_task_with_description(&self, task_name: &str, description: &str) -> TaskId {
         self._create_task(task_name.into(), Some(description.into()))
     }
 
-    fn _create_task(&mut self, name: String, description: Option<String>) -> TaskId {
+    fn _create_task(&self, name: String, description: Option<String>) -> TaskId {
         let t = Task::new(name, description, self.inner.clone());
         let id = t.id;
         self.inner.insert(id, t);
@@ -125,12 +125,23 @@ impl TaskManager {
     pub fn get_mut(&self, id: &TaskId) -> Option<TaskRefMut<'_>> {
         self.inner.get_mut(id).map(TaskRefMut::from)
     }
+
+    pub fn add_dependency(
+        &self,
+        parent: &TaskId,
+        child: &TaskId,
+    ) -> Result<(), AddDependencyError> {
+        match self.inner.get(parent) {
+            None => Err(AddDependencyError::TaskNotFound(parent)),
+            Some(parent_task) => parent_task.add_dependency(child),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum AddDependencyError {
     CycleDetected,
-    TaskNotFound,
+    TaskNotFound(TaskId),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -218,7 +229,7 @@ impl Task {
 
     fn add_dependency(&mut self, dependency_id: &TaskId) -> Result<(), AddDependencyError> {
         match self.tasks.get(dependency_id) {
-            None => Err(AddDependencyError::TaskNotFound),
+            None => Err(AddDependencyError::TaskNotFound(dependency_id)),
             Some(dep) => {
                 if dep.depends_on(&self.id).is_some() {
                     return Err(AddDependencyError::CycleDetected);
