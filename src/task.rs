@@ -150,6 +150,15 @@ pub enum AddDependencyError {
     TaskNotFound(TaskId),
 }
 
+macro_rules! err_dep_cycle {
+    ($from_task_id: expr, $to_task_id: expr) => {{
+        AddDependencyError::CycleDetected(Dependency {
+            from: $from_task_id,
+            to: $to_task_id,
+        })
+    }};
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum DependencyKind {
     Direct,
@@ -232,10 +241,7 @@ impl Task {
             None => Err(AddDependencyError::TaskNotFound(*dependency_id)),
             Some(dep) => {
                 if dep.depends_on(&self.id).is_some() {
-                    return Err(AddDependencyError::CycleDetected(Dependency {
-                        from: self.id,
-                        to: dep.id,
-                    }));
+                    return Err(err_dep_cycle!(self.id, dep.id));
                 }
                 self.deps.insert(dep.id);
                 Ok(())
@@ -400,10 +406,7 @@ mod tests {
             assert!(manager.add_dependency(&id1, &id2).is_ok());
             assert_eq!(
                 manager.add_dependency(&id2, &id1).err(),
-                Some(AddDependencyError::CycleDetected(Dependency {
-                    from: id2,
-                    to: id1
-                }))
+                Some(err_dep_cycle!(id2, id1))
             );
         }
 
@@ -423,10 +426,7 @@ mod tests {
             assert!(manager.add_dependency(&id3, &id4).is_ok());
             assert_eq!(
                 manager.add_dependency(&id4, &id1).err(),
-                Some(AddDependencyError::CycleDetected(Dependency {
-                    from: id4,
-                    to: id1
-                }))
+                Some(err_dep_cycle!(id4, id1))
             );
         }
 
@@ -443,10 +443,7 @@ mod tests {
 
                     assert_eq!(
                         manager.add_dependency_chain(&[id3, id5, id1]).err(),
-                        Some(AddDependencyError::CycleDetected(Dependency {
-                            from: *id5,
-                            to: *id1
-                        }))
+                        Some(err_dep_cycle!(*id5, *id1))
                     );
                 }
                 _ => unreachable!(),
