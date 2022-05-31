@@ -139,8 +139,14 @@ impl TaskManager {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct Dependency {
+    from: TaskId,
+    to: TaskId,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum AddDependencyError {
-    CycleDetected,
+    CycleDetected(Dependency),
     TaskNotFound(TaskId),
 }
 
@@ -226,9 +232,12 @@ impl Task {
             None => Err(AddDependencyError::TaskNotFound(*dependency_id)),
             Some(dep) => {
                 if dep.depends_on(&self.id).is_some() {
-                    return Err(AddDependencyError::CycleDetected);
+                    return Err(AddDependencyError::CycleDetected(Dependency {
+                        from: self.id,
+                        to: dep.id,
+                    }));
                 }
-                self.deps.insert(dep.id.clone());
+                self.deps.insert(dep.id);
                 Ok(())
             }
         }
@@ -238,58 +247,72 @@ impl Task {
 mod tests {
     use super::*;
 
+    impl TaskManager {
+        fn create_random_tasks(&self, num_tasks: usize) -> Vec<TaskId> {
+            (0..num_tasks)
+                .map(|_| self.new_task("random_task"))
+                .collect()
+        }
+
+        fn add_dependency_chain(&self, task_ids: &[&TaskId]) -> Result<(), AddDependencyError> {
+            task_ids
+                .iter()
+                .zip(task_ids.iter().skip(1))
+                .try_for_each(|(parent, child)| self.add_dependency(parent, child))
+        }
+    }
+
     mod basic {
         use super::*;
 
-    #[test]
-    fn create_task_with_name() {
-        let manager = TaskManager::new();
-        let id = manager.new_task("hello world!");
-        let t = manager.get(&id).unwrap();
-        assert_eq!(t.name(), "hello world!");
+        #[test]
+        fn create_task_with_name() {
+            let manager = TaskManager::new();
+            let id = manager.new_task("hello world!");
+            let t = manager.get(&id).unwrap();
+            assert_eq!(t.name(), "hello world!");
+        }
+
+        #[test]
+        fn create_task_with_description() {
+            let manager = TaskManager::new();
+            let name = "hello world!";
+            let description = "this is a very small task";
+            let id = manager.new_task_with_description(name, description);
+            let t = manager.get(&id).unwrap();
+            assert_eq!(t.description().unwrap(), description);
+        }
+
+        #[test]
+        fn update_task() {
+            let mngr = TaskManager::new();
+            let id = mngr.new_task("hi");
+            let mut t = mngr.get_mut(&id).unwrap();
+
+            let new_name = "new name";
+            let new_desc = "new description";
+
+            t.update_name(new_name.to_string());
+            assert_eq!(t.name(), new_name);
+
+            t.update_description(new_desc.to_string());
+            assert_eq!(t.description().unwrap(), new_desc);
+        }
+
+        #[test]
+        fn complete_task() {
+            let manager = TaskManager::new();
+            let id = manager.new_task("hello world");
+            let mut t = manager.get_mut(&id).unwrap();
+            assert!(!t.completed());
+
+            t.complete();
+            assert!(t.completed());
+
+            t.complete();
+            assert!(t.completed());
+        }
     }
-
-    #[test]
-    fn create_task_with_description() {
-        let manager = TaskManager::new();
-        let name = "hello world!";
-        let description = "this is a very small task";
-        let id = manager.new_task_with_description(name, description);
-        let t = manager.get(&id).unwrap();
-        assert_eq!(t.description().unwrap(), description);
-    }
-
-    #[test]
-    fn update_task() {
-        let mngr = TaskManager::new();
-        let id = mngr.new_task("hi");
-        let mut t = mngr.get_mut(&id).unwrap();
-
-        let new_name = "new name";
-        let new_desc = "new description";
-
-        t.update_name(new_name.to_string());
-        assert_eq!(t.name(), new_name);
-
-        t.update_description(new_desc.to_string());
-        assert_eq!(t.description().unwrap(), new_desc);
-    }
-
-    #[test]
-    fn complete_task() {
-        let manager = TaskManager::new();
-        let id = manager.new_task("hello world");
-        let mut t = manager.get_mut(&id).unwrap();
-        assert!(!t.completed());
-
-        t.complete();
-        assert!(t.completed());
-
-        t.complete();
-        assert!(t.completed());
-    }
-    }
-
 
     mod add_deps {
         use super::*;
@@ -377,7 +400,10 @@ mod tests {
             assert!(manager.add_dependency(&id1, &id2).is_ok());
             assert_eq!(
                 manager.add_dependency(&id2, &id1).err(),
-                Some(AddDependencyError::CycleDetected)
+                Some(AddDependencyError::CycleDetected(Dependency {
+                    from: id2,
+                    to: id1
+                }))
             );
         }
 
@@ -397,8 +423,34 @@ mod tests {
             assert!(manager.add_dependency(&id3, &id4).is_ok());
             assert_eq!(
                 manager.add_dependency(&id4, &id1).err(),
-                Some(AddDependencyError::CycleDetected)
+                Some(AddDependencyError::CycleDetected(Dependency {
+                    from: id4,
+                    to: id1
+                }))
             );
+        }
+
+        #[test]
+        fn prevent_cycles_with_multiple_paths() {
+            // t1 -> t2 -> t3 -> t4
+            //  `--- t5 <---^
+
+            let manager = TaskManager::new();
+
+            match manager.create_random_tasks(5).as_slice() {
+                [id1, id2, id3, id4, id5] => {
+                    manager.add_dependency_chain(&[id1, id2, id3, id4]).unwrap();
+
+                    assert_eq!(
+                        manager.add_dependency_chain(&[id3, id5, id1]).err(),
+                        Some(AddDependencyError::CycleDetected(Dependency {
+                            from: *id5,
+                            to: *id1
+                        }))
+                    );
+                }
+                _ => unreachable!(),
+            }
         }
     }
 }
