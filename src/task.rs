@@ -238,6 +238,9 @@ impl Task {
 mod tests {
     use super::*;
 
+    mod basic {
+        use super::*;
+
     #[test]
     fn create_task_with_name() {
         let manager = TaskManager::new();
@@ -285,107 +288,117 @@ mod tests {
         t.complete();
         assert!(t.completed());
     }
-
-    #[test]
-    fn create_task_with_dependency() {
-        let manager = TaskManager::new();
-
-        let dep_id = manager.new_task("dependent task");
-        let parent_id = manager.new_task("parent");
-
-        manager.add_dependency(&parent_id, &dep_id).unwrap();
-
-        let parent = manager.get(&parent_id).unwrap();
-        assert!(parent.has_dependencies());
-        assert_eq!(parent.num_dependencies(), 1);
-        assert_eq!(parent.depends_on(&dep_id).unwrap(), DependencyKind::Direct);
     }
 
-    #[test]
-    fn create_transitive_dependency() {
-        // t1 -> t2 -> t3
 
-        let manager = TaskManager::new();
+    mod add_deps {
+        use super::*;
 
-        let id1 = manager.new_task("t1");
-        let id2 = manager.new_task("t2");
-        let id3 = manager.new_task("t3");
+        #[test]
+        fn create_task_with_dependency() {
+            let manager = TaskManager::new();
 
-        manager.add_dependency(&id1, &id2).unwrap();
-        manager.add_dependency(&id2, &id3).unwrap();
+            let dep_id = manager.new_task("dependent task");
+            let parent_id = manager.new_task("parent");
 
-        assert_eq!(
-            manager.get(&id1).unwrap().depends_on(&id3).unwrap(),
-            DependencyKind::Transitive
-        );
-    }
-
-    #[test]
-    fn dependency_is_unidirectional() {
-        // t1 -> t2 -> t3
-
-        let manager = TaskManager::new();
-
-        let id1 = manager.new_task("t1");
-        let id2 = manager.new_task("t2");
-        let id3 = manager.new_task("t3");
-
-        manager.add_dependency(&id1, &id2).unwrap();
-        manager.add_dependency(&id2, &id3).unwrap();
-
-        assert!(manager.get(&id1).unwrap().depends_on(&id3).is_some());
-        assert!(manager.get(&id3).unwrap().depends_on(&id1).is_none());
-    }
-
-    #[test]
-    fn prevent_duplicate_dependencies() {
-        let manager = TaskManager::new();
-
-        let dep_id = manager.new_task("dependent");
-        let parent_id = manager.new_task("parent");
-
-        for _ in 0..100 {
             manager.add_dependency(&parent_id, &dep_id).unwrap();
+
+            let parent = manager.get(&parent_id).unwrap();
+            assert!(parent.has_dependencies());
+            assert_eq!(parent.num_dependencies(), 1);
+            assert_eq!(parent.depends_on(&dep_id).unwrap(), DependencyKind::Direct);
         }
 
-        let parent = manager.get(&parent_id).unwrap();
-        assert!(parent.has_dependencies());
-        assert_eq!(parent.num_dependencies(), 1);
+        #[test]
+        fn create_transitive_dependency() {
+            // t1 -> t2 -> t3
+
+            let manager = TaskManager::new();
+
+            let id1 = manager.new_task("t1");
+            let id2 = manager.new_task("t2");
+            let id3 = manager.new_task("t3");
+
+            manager.add_dependency(&id1, &id2).unwrap();
+            manager.add_dependency(&id2, &id3).unwrap();
+
+            assert_eq!(
+                manager.get(&id1).unwrap().depends_on(&id3).unwrap(),
+                DependencyKind::Transitive
+            );
+        }
+
+        #[test]
+        fn dependency_is_unidirectional() {
+            // t1 -> t2 -> t3
+
+            let manager = TaskManager::new();
+
+            let id1 = manager.new_task("t1");
+            let id2 = manager.new_task("t2");
+            let id3 = manager.new_task("t3");
+
+            manager.add_dependency(&id1, &id2).unwrap();
+            manager.add_dependency(&id2, &id3).unwrap();
+
+            assert!(manager.get(&id1).unwrap().depends_on(&id3).is_some());
+            assert!(manager.get(&id3).unwrap().depends_on(&id1).is_none());
+        }
+
+        #[test]
+        fn prevent_duplicate_dependencies() {
+            let manager = TaskManager::new();
+
+            let dep_id = manager.new_task("dependent");
+            let parent_id = manager.new_task("parent");
+
+            for _ in 0..100 {
+                manager.add_dependency(&parent_id, &dep_id).unwrap();
+            }
+
+            let parent = manager.get(&parent_id).unwrap();
+            assert!(parent.has_dependencies());
+            assert_eq!(parent.num_dependencies(), 1);
+        }
     }
 
-    #[test]
-    fn prevent_simple_cycle() {
-        // t1 -> t2 -> t1
+    mod no_cyclic_deps {
+        use super::*;
 
-        let manager = TaskManager::new();
+        #[test]
+        fn prevent_simple_cycle() {
+            // t1 -> t2 -> t1
 
-        let id1 = manager.new_task("t1");
-        let id2 = manager.new_task("t2");
+            let manager = TaskManager::new();
 
-        assert!(manager.add_dependency(&id1, &id2).is_ok());
-        assert_eq!(
-            manager.add_dependency(&id2, &id1).err(),
-            Some(AddDependencyError::CycleDetected)
-        );
-    }
+            let id1 = manager.new_task("t1");
+            let id2 = manager.new_task("t2");
 
-    #[test]
-    fn prevent_linear_dependency_cycle() {
-        // t1 -> t2 -> t3 -> t4 -> t1
+            assert!(manager.add_dependency(&id1, &id2).is_ok());
+            assert_eq!(
+                manager.add_dependency(&id2, &id1).err(),
+                Some(AddDependencyError::CycleDetected)
+            );
+        }
 
-        let manager = TaskManager::new();
+        #[test]
+        fn prevent_linear_dependency_cycle() {
+            // t1 -> t2 -> t3 -> t4 -> t1
 
-        let id1 = manager.new_task("t1");
-        let id2 = manager.new_task("t2");
-        let id3 = manager.new_task("t3");
-        let id4 = manager.new_task("t4");
+            let manager = TaskManager::new();
 
-        assert!(manager.add_dependency(&id1, &id2).is_ok());
-        assert!(manager.add_dependency(&id2, &id3).is_ok());
-        assert!(manager.add_dependency(&id3, &id4).is_ok());
-        assert_eq!(
-            manager.add_dependency(&id4, &id1).err(),
-            Some(AddDependencyError::CycleDetected)
-        );
+            let id1 = manager.new_task("t1");
+            let id2 = manager.new_task("t2");
+            let id3 = manager.new_task("t3");
+            let id4 = manager.new_task("t4");
+
+            assert!(manager.add_dependency(&id1, &id2).is_ok());
+            assert!(manager.add_dependency(&id2, &id3).is_ok());
+            assert!(manager.add_dependency(&id3, &id4).is_ok());
+            assert_eq!(
+                manager.add_dependency(&id4, &id1).err(),
+                Some(AddDependencyError::CycleDetected)
+            );
+        }
     }
 }
