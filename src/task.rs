@@ -1,8 +1,9 @@
 use dashmap::mapref::one::{Ref as DashMapRef, RefMut as DashMapRefMut};
 use dashmap::{DashMap, DashSet};
+use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Hash)]
 pub struct TaskId(u64);
@@ -171,7 +172,7 @@ pub struct Task {
     name: String,
     description: Option<String>,
     completed: bool,
-    deps: DashSet<TaskId>,
+    deps: RwLock<HashSet<TaskId>>,
 }
 
 impl Task {
@@ -181,7 +182,7 @@ impl Task {
             id: TaskId::new(),
             name: task_name,
             description,
-            deps: DashSet::new(),
+            deps: RwLock::new(HashSet::new()),
             completed: false,
         }
     }
@@ -214,15 +215,15 @@ impl Task {
     }
 
     fn has_dependencies(&self) -> bool {
-        !self.deps.is_empty()
+        !self.deps.read().unwrap().is_empty()
     }
 
     fn num_dependencies(&self) -> usize {
-        self.deps.len()
+        self.deps.read().unwrap().len()
     }
 
     fn depends_on(&self, target: &TaskId) -> Option<DependencyKind> {
-        if self.deps.contains(target) {
+        if self.deps.read().unwrap().contains(target) {
             return Some(DependencyKind::Direct);
         }
 
@@ -245,7 +246,7 @@ impl Task {
             next_row.clear();
             for curr_id in curr_row {
                 let curr = self.tasks.get(curr_id).unwrap();
-                for dep_id in curr.deps.iter() {
+                for dep_id in curr.deps.read().unwrap().iter() {
                     if *dep_id == *target {
                         return Some(DependencyKind::Transitive);
                     }
@@ -264,7 +265,7 @@ impl Task {
                 if dep.depends_on(&self.id).is_some() {
                     return Err(err_dep_cycle!(self.id, dep.id));
                 }
-                self.deps.insert(dep.id);
+                self.deps.write().unwrap().insert(dep.id);
                 Ok(())
             }
         }
@@ -414,16 +415,16 @@ mod tests {
         fn long_dependency_chain() {
             let manager = TaskManager::new();
 
-            let ids = manager.create_random_tasks(1_000);
+            let ids = manager.create_random_tasks(100_000);
 
             manager
                 .add_dependency_chain_from_ids(ids.as_slice())
                 .unwrap();
 
             let mut count = 0;
-            let target = 1000;
+            let trials = 10;
 
-            while count < target {
+            while count < trials {
                 let id1 = rand::thread_rng().gen_range(0..ids.len());
                 let id2 = rand::thread_rng().gen_range(0..ids.len());
                 if id1 == id2 {
