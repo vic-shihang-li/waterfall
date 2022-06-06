@@ -226,14 +226,35 @@ impl Task {
             return Some(DependencyKind::Direct);
         }
 
-        for dep_id in self.deps.iter() {
-            let dep = self.tasks.get(&dep_id).expect("Found dangling task");
-            if dep.depends_on(target).is_some() {
-                return Some(DependencyKind::Transitive);
-            }
-        }
+        let mut buf1: Vec<TaskId> = vec![self.id];
+        let mut buf2: Vec<TaskId> = vec![];
+        let mut iter = 0;
+        loop {
+            let (curr_row, next_row) = {
+                if iter % 2 == 0 {
+                    (&buf1, &mut buf2)
+                } else {
+                    (&buf2, &mut buf1)
+                }
+            };
 
-        None
+            if curr_row.is_empty() {
+                return None;
+            }
+
+            next_row.clear();
+            for curr_id in curr_row {
+                let curr = self.tasks.get(curr_id).unwrap();
+                for dep_id in curr.deps.iter() {
+                    if *dep_id == *target {
+                        return Some(DependencyKind::Transitive);
+                    }
+                    next_row.push(*dep_id);
+                }
+            }
+
+            iter += 1;
+        }
     }
 
     fn add_dependency(&self, dependency_id: &TaskId) -> Result<(), AddDependencyError> {
@@ -260,7 +281,20 @@ mod tests {
                 .collect()
         }
 
-        fn add_dependency_chain(&self, task_ids: &[&TaskId]) -> Result<(), AddDependencyError> {
+        fn add_dependency_chain_from_ids(
+            &self,
+            task_ids: &[TaskId],
+        ) -> Result<(), AddDependencyError> {
+            task_ids
+                .iter()
+                .zip(task_ids.iter().skip(1))
+                .try_for_each(|(parent, child)| self.add_dependency(parent, child))
+        }
+
+        fn add_dependency_chain_from_refs(
+            &self,
+            task_ids: &[&TaskId],
+        ) -> Result<(), AddDependencyError> {
             task_ids
                 .iter()
                 .zip(task_ids.iter().skip(1))
@@ -321,6 +355,8 @@ mod tests {
     }
 
     mod add_deps {
+        use rand::Rng;
+
         use super::*;
 
         #[test]
@@ -372,6 +408,38 @@ mod tests {
 
             assert!(manager.get(&id1).unwrap().depends_on(&id3).is_some());
             assert!(manager.get(&id3).unwrap().depends_on(&id1).is_none());
+        }
+
+        #[test]
+        fn long_dependency_chain() {
+            let manager = TaskManager::new();
+
+            let ids = manager.create_random_tasks(1_000);
+
+            manager
+                .add_dependency_chain_from_ids(ids.as_slice())
+                .unwrap();
+
+            let mut count = 0;
+            let target = 1000;
+
+            while count < target {
+                let id1 = rand::thread_rng().gen_range(0..ids.len());
+                let id2 = rand::thread_rng().gen_range(0..ids.len());
+                if id1 == id2 {
+                    continue;
+                }
+
+                let parent = if id1 < id2 { id1 } else { id2 };
+                let child = if id1 < id2 { id2 } else { id1 };
+
+                assert!(manager
+                    .get(&ids[parent])
+                    .unwrap()
+                    .depends_on(&ids[child])
+                    .is_some());
+                count += 1;
+            }
         }
 
         #[test]
@@ -439,10 +507,14 @@ mod tests {
 
             match manager.create_random_tasks(5).as_slice() {
                 [id1, id2, id3, id4, id5] => {
-                    manager.add_dependency_chain(&[id1, id2, id3, id4]).unwrap();
+                    manager
+                        .add_dependency_chain_from_refs(&[id1, id2, id3, id4])
+                        .unwrap();
 
                     assert_eq!(
-                        manager.add_dependency_chain(&[id3, id5, id1]).err(),
+                        manager
+                            .add_dependency_chain_from_refs(&[id3, id5, id1])
+                            .err(),
                         Some(err_dep_cycle!(*id5, *id1))
                     );
                 }
