@@ -1,3 +1,3 @@
 mod task;
 
-pub use task::{NewTaskHandle, Task, TaskManager, TaskRef, TaskRefMut};
+pub use task::{Task, TaskManager, TaskRef, TaskRefMut};

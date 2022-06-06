@@ -1,5 +1,5 @@
 use dashmap::mapref::one::{Ref as DashMapRef, RefMut as DashMapRefMut};
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
@@ -57,33 +57,6 @@ impl<'a> Deref for TaskRefMut<'a> {
 impl<'a> DerefMut for TaskRefMut<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner.value_mut()
-    }
-}
-
-pub struct NewTaskHandle {
-    id: TaskId,
-    map: Arc<TaskMap>,
-}
-
-impl NewTaskHandle {
-    fn new(id: TaskId, map: Arc<TaskMap>) -> Self {
-        Self { id, map }
-    }
-
-    fn get(&self) -> Option<TaskRef<'_>> {
-        self.map.get(&self.id).map(TaskRef::from)
-    }
-
-    fn get_unchecked(&self) -> TaskRef<'_> {
-        self.get().unwrap()
-    }
-
-    fn get_mut(&self) -> Option<TaskRefMut<'_>> {
-        self.map.get_mut(&self.id).map(TaskRefMut::from)
-    }
-
-    fn get_mut_unchecked(&self) -> TaskRefMut<'_> {
-        self.get_mut().unwrap()
     }
 }
 
@@ -214,11 +187,11 @@ impl Task {
         self.completed = true;
     }
 
-    fn has_dependencies(&self) -> bool {
+    pub fn has_dependencies(&self) -> bool {
         !self.deps.read().unwrap().is_empty()
     }
 
-    fn num_dependencies(&self) -> usize {
+    pub fn num_dependencies(&self) -> usize {
         self.deps.read().unwrap().len()
     }
 
@@ -272,6 +245,7 @@ impl Task {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
